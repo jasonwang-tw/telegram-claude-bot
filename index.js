@@ -1,7 +1,7 @@
-const TelegramBot = require('node-telegram-bot-api');
+const { Telegraf } = require('telegraf');
 const { execFile } = require('child_process');
 
-const bot = new TelegramBot(process.env.TELEGRAM_BOT_TOKEN, { polling: true });
+const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
 const conversations = new Map();
 
@@ -28,30 +28,25 @@ function askClaude(prompt) {
   });
 }
 
-bot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  const userId = msg.from.id;
-  const text = msg.text && msg.text.trim();
+bot.start((ctx) => ctx.reply('你好！我是 Claude Bot。\n\n指令：\n/clear — 清除對話記憶'));
 
-  if (!text) return;
+bot.command('clear', (ctx) => {
+  conversations.delete(ctx.from.id);
+  ctx.reply('對話記憶已清除。');
+});
+
+bot.on('text', async (ctx) => {
+  const userId = ctx.from.id;
+  const text = ctx.message.text.trim();
 
   if (ALLOWED_IDS.length && !ALLOWED_IDS.includes(userId)) {
-    return bot.sendMessage(chatId, '無存取權限。');
-  }
-
-  if (text === '/start') {
-    return bot.sendMessage(chatId, '你好！我是 Claude Bot。\n\n指令：\n/clear — 清除對話記憶');
-  }
-
-  if (text === '/clear') {
-    conversations.delete(userId);
-    return bot.sendMessage(chatId, '對話記憶已清除。');
+    return ctx.reply('無存取權限。');
   }
 
   const history = conversations.get(userId) || [];
   const prompt = buildPrompt(history, text);
 
-  bot.sendChatAction(chatId, 'typing');
+  ctx.sendChatAction('typing');
 
   try {
     const response = await askClaude(prompt);
@@ -62,13 +57,17 @@ bot.on('message', async (msg) => {
     if (history.length > 20) history.splice(0, history.length - 20);
     conversations.set(userId, history);
 
-    bot.sendMessage(chatId, response, { parse_mode: 'Markdown' })
-      .catch(() => bot.sendMessage(chatId, response));
+    ctx.reply(response, { parse_mode: 'Markdown' })
+      .catch(() => ctx.reply(response));
 
   } catch (err) {
     console.error('Error:', err.message);
-    bot.sendMessage(chatId, `錯誤：${err.message}`);
+    ctx.reply(`錯誤：${err.message}`);
   }
 });
 
 console.log('Telegram Claude Bot 啟動中...');
+bot.launch();
+
+process.once('SIGINT', () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
