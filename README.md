@@ -9,7 +9,7 @@
 ```
 Telegram User
      ↓
-node-telegram-bot-api（polling）
+telegraf v4（polling）
      ↓
 execFile('claude', ['--print', prompt])
      ↓
@@ -27,6 +27,7 @@ Claude.ai Pro 訂閱
 | Zeabur 服務 | Docker 容器，project `69bfc6c5` |
 | Node.js | v20-slim + ca-certificates |
 | Claude Code CLI | 全域安裝 `@anthropic-ai/claude-code` |
+| Telegram 框架 | `telegraf` v4（原生 fetch，穩定） |
 | 憑證 | Volume `claude-creds` 掛載至 `/root/.claude/` |
 | Bot | `@CCZeabur_bot` |
 
@@ -51,7 +52,6 @@ scp ~/.claude/.credentials.json Zeabur:~/.claude/.credentials.json
 ### 3. 建立 GitHub Repo 並推送程式碼
 
 ```bash
-# 本地
 git init
 git add .
 git commit -m "Initial commit"
@@ -92,8 +92,8 @@ ssh Zeabur "sudo k3s kubectl rollout restart deployment \
 
 ```
 telegram-claude-bot/
-├── index.js          # Bot 主程式
-├── package.json      # 依賴：node-telegram-bot-api
+├── index.js          # Bot 主程式（telegraf v4）
+├── package.json      # 依賴：telegraf
 ├── Dockerfile        # Node.js + ca-certificates + claude CLI
 ├── .env              # 本地測試用（不進 Git）
 ├── .env.example
@@ -118,10 +118,12 @@ RUN npm install
 
 COPY . .
 
+ENV NODE_OPTIONS=--dns-result-order=ipv4first
+
 CMD ["node", "index.js"]
 ```
 
-> `ca-certificates` 必須安裝，否則 TLS 連線失敗（AggregateError）
+> `ca-certificates` 必須安裝；`--dns-result-order=ipv4first` 修復 K3s 容器 IPv6 路由不通導致的 ETIMEDOUT。
 
 ---
 
@@ -140,8 +142,10 @@ CMD ["node", "index.js"]
 |------|------|------|
 | `ERR_MODULE_NOT_FOUND` | ESM import `@anthropic-ai/claude-code` 失敗 | 改用 CommonJS + subprocess `execFile('claude')` |
 | `EFATAL: Telegram Bot Token not provided` | 環境變數未設定 | Zeabur 環境變數分頁新增 `TELEGRAM_BOT_TOKEN` |
-| `EFATAL: AggregateError` | `node:20-slim` 缺少 CA 憑證 | Dockerfile 加入 `apt install ca-certificates` |
+| `EFATAL: AggregateError`（舊版） | `node-telegram-bot-api` 0.66 用 `@cypress/request`，在 Node 20 有 TLS 相容問題 | 改用 `telegraf` v4 |
+| `FetchError: ETIMEDOUT` | K3s pod 預設嘗試 IPv6，但容器 IPv6 路由不通 | Dockerfile 加 `ENV NODE_OPTIONS=--dns-result-order=ipv4first` |
 | `claude --print` 無 auth | Volume 憑證未複製 | `kubectl get pvc` 找路徑後手動 `cp` |
+| Volume ID 驗證錯誤 | Zeabur 硬碟 ID 不可留空 | 填入任意名稱如 `claude-creds` |
 
 ---
 
