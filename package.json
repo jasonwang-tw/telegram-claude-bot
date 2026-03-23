@@ -1,0 +1,9 @@
+{
+  "name": "telegram-claude-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "latest",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
