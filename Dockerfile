@@ -13,4 +13,6 @@ RUN npm install
 
 COPY . .
 
+ENV NODE_OPTIONS=--dns-result-order=ipv4first
+
 CMD ["node", "index.js"]
