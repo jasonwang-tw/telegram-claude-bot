@@ -24,8 +24,20 @@ function askClaude(prompt) {
     let stdout = '';
     let stderr = '';
 
-    child.stdout.on('data', (data) => { stdout += data; });
-    child.stderr.on('data', (data) => { stderr += data; });
+    // 偵測互動提示，自動回應 y 確認
+    const AUTO_CONFIRM = /\(y\/n\)|\[y\/n\]|\(yes\/no\)|press enter|continue\?/i;
+    child.stdout.on('data', (data) => {
+      stdout += data;
+      if (AUTO_CONFIRM.test(data.toString())) {
+        child.stdin.write('y\n');
+      }
+    });
+    child.stderr.on('data', (data) => {
+      stderr += data;
+      if (AUTO_CONFIRM.test(data.toString())) {
+        child.stdin.write('y\n');
+      }
+    });
 
     const timer = setTimeout(() => {
       child.kill();
