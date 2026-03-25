@@ -4,10 +4,14 @@ const { spawn } = require('child_process');
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
 const conversations = new Map();
+const pendingPermissions = new Map(); // permId -> { child, resolve }
 
 const ALLOWED_IDS = process.env.ALLOWED_USER_IDS
   ? process.env.ALLOWED_USER_IDS.split(',').map(Number)
   : [];
+
+// 所有需要授權的模式（y/n 類）
+const PERMISSION_PATTERN = /\(y\)es\s*\/\s*\(n\)o|\(y\/n\)|\[y\/n\]|\(yes\/no\)|press enter|continue\?|Allow\s+.+\?|Do you want to allow|bash command:|wants to (read|write|run|execute|edit)/i;
 
 function buildPrompt(history, newMessage) {
   if (history.length === 0) return newMessage;
@@ -15,7 +19,7 @@ function buildPrompt(history, newMessage) {
   return `以下是對話歷史：\n${ctx}\n\nHuman: ${newMessage}`;
 }
 
-function askClaude(prompt) {
+function askClaude(prompt, onPermissionRequest) {
   return new Promise((resolve, reject) => {
     const child = spawn('claude', ['--print'], {
       env: { ...process.env },
@@ -23,21 +27,30 @@ function askClaude(prompt) {
 
     let stdout = '';
     let stderr = '';
+    let waitingForPermission = false;
 
-    // 偵測互動提示，自動回應 y 確認
-    const AUTO_CONFIRM = /\(y\/n\)|\[y\/n\]|\(yes\/no\)|press enter|continue\?/i;
-    child.stdout.on('data', (data) => {
-      stdout += data;
-      if (AUTO_CONFIRM.test(data.toString())) {
-        child.stdin.write('y\n');
+    const handleData = async (data, isStderr) => {
+      const text = data.toString();
+      if (isStderr) stderr += text; else stdout += text;
+
+      if (waitingForPermission) return;
+
+      if (PERMISSION_PATTERN.test(text)) {
+        waitingForPermission = true;
+        // 擷取最近幾行作為提示文字
+        const context = (stdout + (isStderr ? stderr : '')).split('\n').slice(-8).join('\n').trim();
+        try {
+          const allowed = await onPermissionRequest(context, child);
+          child.stdin.write(allowed ? 'y\n' : 'n\n');
+        } catch {
+          child.stdin.write('n\n');
+        }
+        waitingForPermission = false;
       }
-    });
-    child.stderr.on('data', (data) => {
-      stderr += data;
-      if (AUTO_CONFIRM.test(data.toString())) {
-        child.stdin.write('y\n');
-      }
-    });
+    };
+
+    child.stdout.on('data', (data) => handleData(data, false));
+    child.stderr.on('data', (data) => handleData(data, true));
 
     const timer = setTimeout(() => {
       child.kill();
@@ -54,6 +67,23 @@ function askClaude(prompt) {
     child.stdin.end();
   });
 }
+
+// 處理授權按鈕回調
+bot.action(/^perm_(allow|deny)_(.+)$/, async (ctx) => {
+  const [, action, permId] = ctx.match;
+  const pending = pendingPermissions.get(permId);
+
+  if (!pending) {
+    return ctx.answerCbQuery('此授權請求已過期');
+  }
+
+  pendingPermissions.delete(permId);
+  const allowed = action === 'allow';
+
+  await ctx.editMessageText(allowed ? '✅ 已允許' : '❌ 已拒絕');
+  await ctx.answerCbQuery();
+  pending.resolve(allowed);
+});
 
 bot.start((ctx) => ctx.reply('你好！我是 Claude Bot。\n\n指令：\n/clear — 清除對話記憶'));
 
@@ -76,7 +106,34 @@ bot.on('text', async (ctx) => {
   ctx.sendChatAction('typing');
 
   try {
-    const response = await askClaude(prompt);
+    const response = await askClaude(prompt, async (permissionText, child) => {
+      const permId = `${userId}_${Date.now()}`;
+
+      await ctx.reply(
+        `🔐 *需要授權*\n\`\`\`\n${permissionText.slice(0, 500)}\n\`\`\``,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: {
+            inline_keyboard: [[
+              { text: '✅ Allow', callback_data: `perm_allow_${permId}` },
+              { text: '❌ Deny', callback_data: `perm_deny_${permId}` },
+            ]],
+          },
+        }
+      );
+
+      return new Promise((resolve) => {
+        pendingPermissions.set(permId, { child, resolve });
+        // 60 秒無回應自動拒絕
+        setTimeout(() => {
+          if (pendingPermissions.has(permId)) {
+            pendingPermissions.delete(permId);
+            child.stdin.write('n\n');
+            resolve(false);
+          }
+        }, 60000);
+      });
+    });
 
     history.push({ role: 'Human', content: text });
     history.push({ role: 'Assistant', content: response });
