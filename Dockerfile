@@ -15,23 +15,15 @@ COPY . .
 
 ENV NODE_OPTIONS=--dns-result-order=ipv4first
 
-# 啟動時還原 Claude 認證（三層 fallback）：
-# 1. 優先從環境變數還原
-# 2. 若無環境變數，從備份目錄還原最新備份
-# 3. 若無備份，建立最小設定檔
 CMD ["sh", "-c", "\
   mkdir -p /root/.claude && \
-  if [ -n \"$CLAUDE_CREDENTIALS\" ]; then \
-    echo \"$CLAUDE_CREDENTIALS\" | base64 -d > /root/.claude/.credentials.json; \
-  fi && \
+  { [ -n \"$CLAUDE_CREDENTIALS\" ] && printf '%s' \"$CLAUDE_CREDENTIALS\" | tr -d ' \\n\\r' | base64 -d > /root/.claude/.credentials.json 2>/dev/null || true; } && \
   if [ -n \"$CLAUDE_CONFIG\" ]; then \
-    echo \"$CLAUDE_CONFIG\" | base64 -d > /root/.claude.json; \
-  elif [ ! -f /root/.claude.json ]; then \
+    printf '%s' \"$CLAUDE_CONFIG\" | tr -d ' \\n\\r' | base64 -d > /root/.claude.json 2>/dev/null || true; \
+  fi && \
+  if [ ! -f /root/.claude.json ]; then \
     LATEST=$(ls -t /root/.claude/backups/.claude.json.backup.* 2>/dev/null | head -1); \
-    if [ -n \"$LATEST\" ]; then \
-      cp \"$LATEST\" /root/.claude.json; \
-    else \
-      echo '{\"hasCompletedOnboarding\":true}' > /root/.claude.json; \
-    fi; \
+    if [ -n \"$LATEST\" ]; then cp \"$LATEST\" /root/.claude.json; \
+    else echo '{\"hasCompletedOnboarding\":true}' > /root/.claude.json; fi; \
   fi && \
   node index.js"]
