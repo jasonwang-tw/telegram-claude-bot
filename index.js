@@ -21,7 +21,7 @@ function buildPrompt(history, newMessage) {
 
 function askClaude(prompt, onPermissionRequest) {
   return new Promise((resolve, reject) => {
-    const child = spawn('claude', ['--print'], {
+    const child = spawn('claude', ['--print', '--add-dir', '/root'], {
       env: { ...process.env },
     });
 
