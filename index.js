@@ -17,7 +17,7 @@ function buildPrompt(history, newMessage) {
 
 function askClaude(prompt) {
   return new Promise((resolve, reject) => {
-    const child = spawn('claude', ['--print', '--dangerously-skip-permissions'], {
+    const child = spawn('claude', ['--print'], {
       env: { ...process.env },
     });
 

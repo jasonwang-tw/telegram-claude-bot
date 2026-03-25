@@ -13,13 +13,7 @@ RUN npm install
 
 COPY . .
 
-# 建立非 root 使用者與 claude 設定目錄
-RUN useradd -m -s /bin/sh botuser && \
-    mkdir -p /home/botuser/.claude && \
-    echo '{"hasCompletedOnboarding":true}' > /home/botuser/.claude.json && \
-    chown -R botuser:botuser /home/botuser /app
-
 ENV NODE_OPTIONS=--dns-result-order=ipv4first
 
-# 以 root 啟動，再用 su 切換到 botuser 執行 node（繞過 Zeabur 強制 root 問題）
-CMD ["sh", "-c", "su -p -s /bin/sh botuser -c 'HOME=/home/botuser node /app/index.js'"]
+# 啟動時：若 .claude.json 不存在則從最新備份還原，再執行 bot
+CMD ["sh", "-c", "[ -f /root/.claude.json ] || cp $(ls -t /root/.claude/backups/.claude.json.backup.* 2>/dev/null | head -1) /root/.claude.json 2>/dev/null; node index.js"]
