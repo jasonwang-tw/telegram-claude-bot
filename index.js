@@ -1,5 +1,5 @@
 const { Telegraf } = require('telegraf');
-const { execFile } = require('child_process');
+const { spawn } = require('child_process');
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
@@ -17,14 +17,29 @@ function buildPrompt(history, newMessage) {
 
 function askClaude(prompt) {
   return new Promise((resolve, reject) => {
-    execFile('claude', ['--print', prompt], {
+    const child = spawn('claude', ['--print', '--dangerously-skip-permissions'], {
       env: { ...process.env, HOME: '/root' },
-      timeout: 120000,
-      maxBuffer: 1024 * 1024 * 10,
-    }, (err, stdout, stderr) => {
-      if (err) return reject(new Error(stderr || err.message));
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (data) => { stdout += data; });
+    child.stderr.on('data', (data) => { stderr += data; });
+
+    const timer = setTimeout(() => {
+      child.kill();
+      reject(new Error('逾時（120秒）'));
+    }, 120000);
+
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      if (code !== 0) return reject(new Error(stderr.trim() || `exit code ${code}`));
       resolve(stdout.trim());
     });
+
+    child.stdin.write(prompt);
+    child.stdin.end();
   });
 }
 
