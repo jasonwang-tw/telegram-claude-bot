@@ -13,6 +13,13 @@ RUN npm install
 
 COPY . .
 
-ENV NODE_OPTIONS=--dns-result-order=ipv4first
+# 建立 claude 設定目錄（使用 node 使用者，非 root）
+RUN mkdir -p /home/node/.claude && chown -R node:node /home/node/.claude /app
 
-CMD ["node", "index.js"]
+ENV NODE_OPTIONS=--dns-result-order=ipv4first
+ENV HOME=/home/node
+
+USER node
+
+# 啟動時先建立 .claude.json 再執行 bot
+CMD ["sh", "-c", "echo '{\"hasCompletedOnboarding\":true}' > /home/node/.claude.json && node index.js"]
