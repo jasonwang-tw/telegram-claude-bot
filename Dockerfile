@@ -15,5 +15,9 @@ COPY . .
 
 ENV NODE_OPTIONS=--dns-result-order=ipv4first
 
-# 啟動時：若 .claude.json 不存在則從最新備份還原，再執行 bot
-CMD ["sh", "-c", "[ -f /root/.claude.json ] || cp $(ls -t /root/.claude/backups/.claude.json.backup.* 2>/dev/null | head -1) /root/.claude.json 2>/dev/null; node index.js"]
+# 啟動時從環境變數還原 Claude 認證檔案，再執行 bot
+CMD ["sh", "-c", "\
+  mkdir -p /root/.claude && \
+  [ -n \"$CLAUDE_CREDENTIALS\" ] && echo \"$CLAUDE_CREDENTIALS\" | base64 -d > /root/.claude/.credentials.json; \
+  [ -n \"$CLAUDE_CONFIG\" ] && echo \"$CLAUDE_CONFIG\" | base64 -d > /root/.claude.json; \
+  node index.js"]
