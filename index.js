@@ -99,16 +99,15 @@ bot.action(/^perm_(allow|deny)_(.+)$/, async (ctx) => {
   pending.resolve(allowed);
 });
 
-// 註冊指令選單（顯示在 Telegram 輸入框旁）
-bot.telegram.setMyCommands([
-  { command: 'start',  description: '啟動 Bot' },
-  { command: 'help',   description: '顯示所有指令' },
-  { command: 'clear',  description: '清除對話記憶' },
-  { command: 'usage',  description: '查看 Claude 用量' },
-  { command: 'model',  description: '目前使用的模型' },
-  { command: 'status', description: 'Bot 狀態' },
-  { command: 'version',description: 'Claude CLI 版本' },
-]).catch(console.error);
+const BOT_COMMANDS = [
+  { command: 'start',   description: '啟動 Bot' },
+  { command: 'help',    description: '顯示所有指令' },
+  { command: 'clear',   description: '清除對話記憶' },
+  { command: 'usage',   description: '查看 Claude 用量' },
+  { command: 'model',   description: '目前使用的模型' },
+  { command: 'status',  description: 'Bot 狀態' },
+  { command: 'version', description: 'Claude CLI 版本' },
+];
 
 bot.start((ctx) => ctx.reply(
   '你好！我是 Claude Bot。\n\n可用指令：\n' +
@@ -238,7 +237,15 @@ bot.on('text', async (ctx) => {
 });
 
 console.log('Telegram Claude Bot 啟動中...');
-bot.launch();
+bot.launch().then(async () => {
+  console.log('Bot 已啟動，正在註冊指令選單...');
+  try {
+    await bot.telegram.setMyCommands(BOT_COMMANDS);
+    console.log('指令選單註冊完成');
+  } catch (err) {
+    console.error('指令選單註冊失敗：', err.message);
+  }
+});
 
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
