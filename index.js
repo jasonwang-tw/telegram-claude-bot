@@ -242,8 +242,9 @@ bot.command('usage', async (ctx) => {
       child.stdin.end();
     });
 
-    // 去除 ANSI 色碼
-    const plain = result.replace(/\x1b\[[0-9;]*m/g, '').trim();
+    // 去除 ANSI 色碼，移除第一行（model/context 資訊）
+    const plain = result.replace(/\x1b\[[0-9;]*m/g, '')
+      .split('\n').slice(1).join('\n').trim();
     ctx.reply(`\`\`\`\n${plain}\n\`\`\``, { parse_mode: 'Markdown' })
       .catch(() => ctx.reply(plain));
   } catch (err) {
