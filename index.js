@@ -139,7 +139,10 @@ bot.command('clear', (ctx) => {
 bot.command('usage', async (ctx) => {
   ctx.sendChatAction('typing');
   try {
-    const result = await askClaude('/usage', async () => false);
+    const result = await askClaude(
+      '請查看 /root/.claude/ 目錄下所有檔案，找出 Claude Code 使用量統計（current session 百分比、weekly 百分比、重置時間），並以純文字格式回報。若找不到用量檔案，請列出 /root/.claude/ 的檔案清單。',
+      async () => false
+    );
     ctx.reply(result || '無用量資訊');
   } catch (err) {
     ctx.reply(`錯誤：${err.message}`);
