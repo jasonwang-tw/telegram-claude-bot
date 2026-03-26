@@ -136,46 +136,64 @@ bot.command('clear', (ctx) => {
   ctx.reply('對話記憶已清除。');
 });
 
-bot.command('usage', (ctx) => {
+bot.command('usage', async (ctx) => {
+  ctx.sendChatAction('typing');
   const fs = require('fs');
-  const lines = [];
 
   try {
-    // 列出 .claude 目錄所有檔案（debug 用）
-    const claudeDir = '/root/.claude';
-    const files = fs.readdirSync(claudeDir);
-    lines.push(`📁 ${claudeDir}/`);
-    lines.push(files.join('\n'));
-    lines.push('');
+    // 讀取 access token
+    const cred = JSON.parse(fs.readFileSync('/root/.claude/.credentials.json', 'utf8'));
+    const oauth = cred.claudeAiOauth || cred;
+    const token = oauth.accessToken;
+    if (!token) return ctx.reply('錯誤：找不到 access token');
 
-    // 嘗試讀取可能的用量檔案
-    const candidates = ['usage.json', 'stats.json', 'usage', 'session.json'];
-    for (const f of candidates) {
-      const p = `${claudeDir}/${f}`;
-      if (fs.existsSync(p)) {
-        lines.push(`📄 ${f}:`);
-        lines.push(fs.readFileSync(p, 'utf8').slice(0, 800));
-        lines.push('');
+    // 呼叫 Claude API 取得用量
+    const res = await fetch('https://api.claude.ai/api/usage_status', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!res.ok) {
+      // 回傳原始內容供 debug
+      const text = await res.text();
+      return ctx.reply(`API ${res.status}：${text.slice(0, 300)}`);
+    }
+
+    const data = await res.json();
+
+    // 格式化輸出
+    const lines = [];
+    if (data.model) lines.push(`模型：${data.model}`);
+
+    for (const [key, val] of Object.entries(data)) {
+      if (typeof val === 'object' && val !== null && 'percent' in val) {
+        const bar = renderBar(val.percent);
+        const reset = val.resetAt ? new Date(val.resetAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) : '';
+        lines.push(`${key.padEnd(8)} ${bar} ${val.percent}%${reset ? ` ⟳ ${reset}` : ''}`);
       }
     }
 
-    // 從 credentials 顯示訂閱資訊
-    const credPath = `${claudeDir}/.credentials.json`;
-    if (fs.existsSync(credPath)) {
-      const cred = JSON.parse(fs.readFileSync(credPath, 'utf8'));
-      const oauth = cred.claudeAiOauth || cred;
-      if (oauth.subscriptionType) lines.push(`訂閱方案：${oauth.subscriptionType}`);
-      if (oauth.expiresAt) {
-        const exp = new Date(oauth.expiresAt);
-        lines.push(`Token 效期：${exp.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`);
-      }
+    if (lines.length === 0) {
+      // 找不到預期欄位，回傳原始 JSON
+      lines.push(JSON.stringify(data, null, 2).slice(0, 800));
     }
+
+    // 訂閱資訊
+    if (oauth.subscriptionType) lines.push(`\n訂閱：${oauth.subscriptionType}`);
+
+    ctx.reply(lines.join('\n'));
   } catch (err) {
-    lines.push(`錯誤：${err.message}`);
+    ctx.reply(`錯誤：${err.message}`);
   }
-
-  ctx.reply(lines.join('\n') || '無用量資訊');
 });
+
+function renderBar(percent) {
+  const total = 10;
+  const filled = Math.round((percent / 100) * total);
+  return '●'.repeat(filled) + '○'.repeat(total - filled);
+}
 
 bot.command('model', async (ctx) => {
   ctx.sendChatAction('typing');
