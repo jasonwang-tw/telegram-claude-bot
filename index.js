@@ -136,108 +136,36 @@ bot.command('clear', (ctx) => {
   ctx.reply('對話記憶已清除。');
 });
 
-// usage cache
-let usageCache = null;
-let usageCacheAt = 0;
-let usageRateLimitUntil = 0;
-const USAGE_CACHE_TTL = 60 * 1000;
-const USAGE_RATELIMIT_COOLDOWN = 5 * 60 * 1000; // 429 後等 5 分鐘
-
 bot.command('usage', async (ctx) => {
   ctx.sendChatAction('typing');
-  const fs = require('fs');
-
   try {
-    const cred = JSON.parse(fs.readFileSync('/root/.claude/.credentials.json', 'utf8'));
-    const oauth = cred.claudeAiOauth || cred;
-    const token = oauth.accessToken;
-    if (!token) return ctx.reply('錯誤：找不到 access token');
+    // 傳入最小 JSON 讓 statusline.sh 跳過 context window，只取用量資料
+    const minimalInput = JSON.stringify({
+      model: { display_name: 'Claude' },
+      context_window: { context_window_size: 200000, current_usage: { input_tokens: 0 } },
+      cwd: '/app',
+    });
 
-    let data;
-    const now = Date.now();
-
-    if (usageCache && (now - usageCacheAt) < USAGE_CACHE_TTL) {
-      // cache 未過期
-      data = usageCache;
-    } else if (now < usageRateLimitUntil) {
-      // 冷卻中
-      const remaining = Math.ceil((usageRateLimitUntil - now) / 1000);
-      if (usageCache) {
-        data = usageCache;
-        await ctx.reply(`（Rate limited，${remaining}s 後可重新整理，顯示快取資料）`);
-      } else {
-        return ctx.reply(`Rate limited，請等待 ${remaining} 秒後再試`);
-      }
-    } else {
-      const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-          'anthropic-beta': 'oauth-2025-04-20',
-          'User-Agent': 'claude-code/2.1.34',
-        },
+    const result = await new Promise((resolve, reject) => {
+      const child = spawn('bash', ['/app/statusline.sh'], {
+        env: { ...process.env, HOME: '/root' },
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
+      let out = '', err = '';
+      child.stdout.on('data', (d) => { out += d.toString(); });
+      child.stderr.on('data', (d) => { err += d.toString(); });
+      child.on('close', (code) => {
+        if (code !== 0) reject(new Error(err.trim() || `exit code ${code}`));
+        else resolve(out);
+      });
+      child.stdin.write(minimalInput);
+      child.stdin.end();
+    });
 
-      if (!res.ok) {
-        const text = await res.text();
-        if (res.status === 429) {
-          usageRateLimitUntil = now + USAGE_RATELIMIT_COOLDOWN;
-          if (usageCache) {
-            data = usageCache;
-            await ctx.reply('（Rate limited，5 分鐘後可重新整理，顯示快取資料）');
-          } else {
-            return ctx.reply('Rate limited，請等待 5 分鐘後再試');
-          }
-        } else {
-          return ctx.reply(`API ${res.status}：${text.slice(0, 300)}`);
-        }
-      } else {
-        data = await res.json();
-        usageCache = data;
-        usageCacheAt = now;
-        usageRateLimitUntil = 0;
-      }
-    }
-
-    const data2 = data;
-    const lines = [];
-
-    // 訂閱資訊
-    if (oauth.subscriptionType) lines.push(`訂閱：${oauth.subscriptionType.toUpperCase()}\n`);
-
-    const renderBar = (pct, width = 10) => {
-      const p = Math.min(100, Math.max(0, Math.round(pct)));
-      const filled = Math.round(p * width / 100);
-      return '●'.repeat(filled) + '○'.repeat(width - filled);
-    };
-
-    const formatReset = (iso) => {
-      if (!iso) return '';
-      return new Date(iso).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    };
-
-    if (data2.five_hour) {
-      const pct = Math.round((data2.five_hour.utilization || 0));
-      const reset = formatReset(data2.five_hour.resets_at);
-      lines.push(`current ${renderBar(pct)} ${String(pct).padStart(3)}% ⟳ ${reset}`);
-    }
-    if (data2.seven_day) {
-      const pct = Math.round((data2.seven_day.utilization || 0));
-      const reset = formatReset(data2.seven_day.resets_at);
-      lines.push(`weekly  ${renderBar(pct)} ${String(pct).padStart(3)}% ⟳ ${reset}`);
-    }
-    if (data2.extra_usage?.is_enabled) {
-      const pct = Math.round(data2.extra_usage.utilization || 0);
-      const used = (data2.extra_usage.used_credits / 100).toFixed(2);
-      const limit = (data2.extra_usage.monthly_limit / 100).toFixed(2);
-      lines.push(`extra   ${renderBar(pct)}  $${used}/$${limit}`);
-    }
-
-    if (lines.length <= 1) lines.push(JSON.stringify(data2, null, 2).slice(0, 500));
-
-    ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })
-      .catch(() => ctx.reply(lines.join('\n')));
-
+    // 去除 ANSI 色碼
+    const plain = result.replace(/\x1b\[[0-9;]*m/g, '').trim();
+    ctx.reply(`\`\`\`\n${plain}\n\`\`\``, { parse_mode: 'Markdown' })
+      .catch(() => ctx.reply(plain));
   } catch (err) {
     ctx.reply(`錯誤：${err.message}`);
   }
