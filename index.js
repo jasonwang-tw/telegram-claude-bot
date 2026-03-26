@@ -136,10 +136,12 @@ bot.command('clear', (ctx) => {
   ctx.reply('對話記憶已清除。');
 });
 
-// usage cache，60 秒 TTL（與 statusline.sh 一致）
+// usage cache
 let usageCache = null;
 let usageCacheAt = 0;
+let usageRateLimitUntil = 0;
 const USAGE_CACHE_TTL = 60 * 1000;
+const USAGE_RATELIMIT_COOLDOWN = 5 * 60 * 1000; // 429 後等 5 分鐘
 
 bot.command('usage', async (ctx) => {
   ctx.sendChatAction('typing');
@@ -151,11 +153,21 @@ bot.command('usage', async (ctx) => {
     const token = oauth.accessToken;
     if (!token) return ctx.reply('錯誤：找不到 access token');
 
-    // 若 cache 未過期直接用
     let data;
     const now = Date.now();
+
     if (usageCache && (now - usageCacheAt) < USAGE_CACHE_TTL) {
+      // cache 未過期
       data = usageCache;
+    } else if (now < usageRateLimitUntil) {
+      // 冷卻中
+      const remaining = Math.ceil((usageRateLimitUntil - now) / 1000);
+      if (usageCache) {
+        data = usageCache;
+        await ctx.reply(`（Rate limited，${remaining}s 後可重新整理，顯示快取資料）`);
+      } else {
+        return ctx.reply(`Rate limited，請等待 ${remaining} 秒後再試`);
+      }
     } else {
       const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
         headers: {
@@ -168,10 +180,14 @@ bot.command('usage', async (ctx) => {
 
       if (!res.ok) {
         const text = await res.text();
-        // 若 429 且有舊 cache，顯示舊資料加提示
-        if (res.status === 429 && usageCache) {
-          data = usageCache;
-          ctx.reply('（使用快取資料）');
+        if (res.status === 429) {
+          usageRateLimitUntil = now + USAGE_RATELIMIT_COOLDOWN;
+          if (usageCache) {
+            data = usageCache;
+            await ctx.reply('（Rate limited，5 分鐘後可重新整理，顯示快取資料）');
+          } else {
+            return ctx.reply('Rate limited，請等待 5 分鐘後再試');
+          }
         } else {
           return ctx.reply(`API ${res.status}：${text.slice(0, 300)}`);
         }
@@ -179,6 +195,7 @@ bot.command('usage', async (ctx) => {
         data = await res.json();
         usageCache = data;
         usageCacheAt = now;
+        usageRateLimitUntil = 0;
       }
     }
 
