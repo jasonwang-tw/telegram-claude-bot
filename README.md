@@ -2,7 +2,7 @@
 
 在 Zeabur 雲端部署 Claude Code Telegram Bot，使用 Claude.ai 訂閱 OAuth 驗證。
 
-**版本：1.3.2**
+**版本：1.4.0**
 
 ---
 
@@ -256,10 +256,26 @@ claude auth login
 | Claude 無法存取 `/root/.claude/` | 預設工作目錄 `/app`，Claude 受限於此 | 加入 `--add-dir /root` + 建立 `CLAUDE.md` |
 | Bot 與本機 token 互相失效 | 共用同一 OAuth session，token rotation 互衝 | 複製憑證後本機重新登入，建立獨立 session |
 | Claude 輸出「需要你批准」而非執行 | `--print` 模式 stdin 在寫入 prompt 後立即關閉，Claude 無法接收 y/n 回應 | Dockerfile CMD 建立 `settings.json` 預授權所有工具 |
+| `exit code 1`（沉默失敗） | `settings.json` 格式錯誤導致 Claude CLI 崩潰 | 移除錯誤的 settings.json；error 訊息加入 stdout 輸出 |
+| 更新 Zeabur 環境變數後其他變數消失 | `updateEnvironmentVariable` data:Map 會覆蓋全部變數 | 先 query 讀取現有變數，合併後再 update |
+| `fetch failed`（Zeabur API） | 端點 `gateway.zeabur.com` 不存在 | 正確端點為 `api.zeabur.com/graphql` |
 
 ---
 
 ## Changelog
+
+## [1.4.0] - 2026-03-26
+### Added
+- `statusline.sh` 複製進容器，Dockerfile 安裝 `curl jq bash`
+- `/usage` 改為執行 `statusline.sh`，輸出 current/weekly 用量條（去除 ANSI 色碼）
+- `CLAUDE_CREDENTIALS` 自動同步至 Zeabur：每次對話後偵測 credentials 變化即更新，每 4 小時定期同步
+- token 即將過期（剩不到 1 小時）時自動觸發 refresh
+### Fixed
+- `/usage` 移除第一行 model/context 資訊，只顯示 current/weekly 用量
+- Zeabur GraphQL 正確端點 `api.zeabur.com` 及 mutation `updateEnvironmentVariable(serviceID, environmentID, data: Map!)`
+- 更新前先 query 現有變數並合併，避免覆蓋其他環境變數
+- `settings.json` 格式錯誤導致 Claude CLI exit code 1，已移除
+- error 訊息同時顯示 stdout，方便 debug
 
 ## [1.3.2] - 2026-03-26
 ### Added
