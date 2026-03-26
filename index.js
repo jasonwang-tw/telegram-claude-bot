@@ -136,33 +136,72 @@ bot.command('clear', (ctx) => {
   ctx.reply('對話記憶已清除。');
 });
 
-bot.command('usage', (ctx) => {
+bot.command('usage', async (ctx) => {
+  ctx.sendChatAction('typing');
   const fs = require('fs');
-  const lines = [];
 
   try {
     const cred = JSON.parse(fs.readFileSync('/root/.claude/.credentials.json', 'utf8'));
     const oauth = cred.claudeAiOauth || cred;
+    const token = oauth.accessToken;
+    if (!token) return ctx.reply('錯誤：找不到 access token');
 
-    if (oauth.subscriptionType) lines.push(`訂閱方案：${oauth.subscriptionType.toUpperCase()}`);
+    const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'anthropic-beta': 'oauth-2025-04-20',
+        'User-Agent': 'claude-code/2.1.34',
+      },
+    });
 
-    const cfg = '/root/.claude.json';
-    if (fs.existsSync(cfg)) {
-      const c = JSON.parse(fs.readFileSync(cfg, 'utf8'));
-      if (c.oauthAccount?.emailAddress) lines.push(`帳號：${c.oauthAccount.emailAddress}`);
+    if (!res.ok) {
+      const text = await res.text();
+      return ctx.reply(`API ${res.status}：${text.slice(0, 300)}`);
     }
 
-    if (oauth.expiresAt) {
-      const exp = new Date(oauth.expiresAt);
-      lines.push(`Token 效期：${exp.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`);
+    const data = await res.json();
+    const lines = [];
+
+    // 訂閱資訊
+    if (oauth.subscriptionType) lines.push(`訂閱：${oauth.subscriptionType.toUpperCase()}\n`);
+
+    const renderBar = (pct, width = 10) => {
+      const p = Math.min(100, Math.max(0, Math.round(pct)));
+      const filled = Math.round(p * width / 100);
+      return '●'.repeat(filled) + '○'.repeat(width - filled);
+    };
+
+    const formatReset = (iso) => {
+      if (!iso) return '';
+      return new Date(iso).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    };
+
+    if (data.five_hour) {
+      const pct = Math.round((data.five_hour.utilization || 0));
+      const reset = formatReset(data.five_hour.resets_at);
+      lines.push(`current ${renderBar(pct)} ${String(pct).padStart(3)}% ⟳ ${reset}`);
+    }
+    if (data.seven_day) {
+      const pct = Math.round((data.seven_day.utilization || 0));
+      const reset = formatReset(data.seven_day.resets_at);
+      lines.push(`weekly  ${renderBar(pct)} ${String(pct).padStart(3)}% ⟳ ${reset}`);
+    }
+    if (data.extra_usage?.is_enabled) {
+      const pct = Math.round(data.extra_usage.utilization || 0);
+      const used = (data.extra_usage.used_credits / 100).toFixed(2);
+      const limit = (data.extra_usage.monthly_limit / 100).toFixed(2);
+      lines.push(`extra   ${renderBar(pct)}  $${used}/$${limit}`);
     }
 
-    lines.push('\n詳細用量請至 claude.ai 查看（容器環境無法存取 claude.ai API）');
+    if (lines.length <= 1) lines.push(JSON.stringify(data, null, 2).slice(0, 500));
+
+    ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })
+      .catch(() => ctx.reply(lines.join('\n')));
+
   } catch (err) {
-    lines.push(`錯誤：${err.message}`);
+    ctx.reply(`錯誤：${err.message}`);
   }
-
-  ctx.reply(lines.join('\n'));
 });
 
 bot.command('model', async (ctx) => {
