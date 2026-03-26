@@ -136,6 +136,11 @@ bot.command('clear', (ctx) => {
   ctx.reply('對話記憶已清除。');
 });
 
+// usage cache，60 秒 TTL（與 statusline.sh 一致）
+let usageCache = null;
+let usageCacheAt = 0;
+const USAGE_CACHE_TTL = 60 * 1000;
+
 bot.command('usage', async (ctx) => {
   ctx.sendChatAction('typing');
   const fs = require('fs');
@@ -146,21 +151,38 @@ bot.command('usage', async (ctx) => {
     const token = oauth.accessToken;
     if (!token) return ctx.reply('錯誤：找不到 access token');
 
-    const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'anthropic-beta': 'oauth-2025-04-20',
-        'User-Agent': 'claude-code/2.1.34',
-      },
-    });
+    // 若 cache 未過期直接用
+    let data;
+    const now = Date.now();
+    if (usageCache && (now - usageCacheAt) < USAGE_CACHE_TTL) {
+      data = usageCache;
+    } else {
+      const res = await fetch('https://api.anthropic.com/api/oauth/usage', {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'anthropic-beta': 'oauth-2025-04-20',
+          'User-Agent': 'claude-code/2.1.34',
+        },
+      });
 
-    if (!res.ok) {
-      const text = await res.text();
-      return ctx.reply(`API ${res.status}：${text.slice(0, 300)}`);
+      if (!res.ok) {
+        const text = await res.text();
+        // 若 429 且有舊 cache，顯示舊資料加提示
+        if (res.status === 429 && usageCache) {
+          data = usageCache;
+          ctx.reply('（使用快取資料）');
+        } else {
+          return ctx.reply(`API ${res.status}：${text.slice(0, 300)}`);
+        }
+      } else {
+        data = await res.json();
+        usageCache = data;
+        usageCacheAt = now;
+      }
     }
 
-    const data = await res.json();
+    const data2 = data;
     const lines = [];
 
     // 訂閱資訊
@@ -177,24 +199,24 @@ bot.command('usage', async (ctx) => {
       return new Date(iso).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
     };
 
-    if (data.five_hour) {
-      const pct = Math.round((data.five_hour.utilization || 0));
-      const reset = formatReset(data.five_hour.resets_at);
+    if (data2.five_hour) {
+      const pct = Math.round((data2.five_hour.utilization || 0));
+      const reset = formatReset(data2.five_hour.resets_at);
       lines.push(`current ${renderBar(pct)} ${String(pct).padStart(3)}% ⟳ ${reset}`);
     }
-    if (data.seven_day) {
-      const pct = Math.round((data.seven_day.utilization || 0));
-      const reset = formatReset(data.seven_day.resets_at);
+    if (data2.seven_day) {
+      const pct = Math.round((data2.seven_day.utilization || 0));
+      const reset = formatReset(data2.seven_day.resets_at);
       lines.push(`weekly  ${renderBar(pct)} ${String(pct).padStart(3)}% ⟳ ${reset}`);
     }
-    if (data.extra_usage?.is_enabled) {
-      const pct = Math.round(data.extra_usage.utilization || 0);
-      const used = (data.extra_usage.used_credits / 100).toFixed(2);
-      const limit = (data.extra_usage.monthly_limit / 100).toFixed(2);
+    if (data2.extra_usage?.is_enabled) {
+      const pct = Math.round(data2.extra_usage.utilization || 0);
+      const used = (data2.extra_usage.used_credits / 100).toFixed(2);
+      const limit = (data2.extra_usage.monthly_limit / 100).toFixed(2);
       lines.push(`extra   ${renderBar(pct)}  $${used}/$${limit}`);
     }
 
-    if (lines.length <= 1) lines.push(JSON.stringify(data, null, 2).slice(0, 500));
+    if (lines.length <= 1) lines.push(JSON.stringify(data2, null, 2).slice(0, 500));
 
     ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' })
       .catch(() => ctx.reply(lines.join('\n')));
