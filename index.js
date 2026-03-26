@@ -73,7 +73,10 @@ function askClaude(prompt, onPermissionRequest) {
 
     child.on('close', (code) => {
       clearTimeout(timer);
-      if (code !== 0) return reject(new Error(stderr.trim() || `exit code ${code}`));
+      if (code !== 0) {
+        const msg = stderr.trim() || stdout.trim() || `exit code ${code}`;
+        return reject(new Error(msg));
+      }
       resolve(stdout.trim());
     });
 
