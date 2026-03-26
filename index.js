@@ -136,17 +136,45 @@ bot.command('clear', (ctx) => {
   ctx.reply('對話記憶已清除。');
 });
 
-bot.command('usage', async (ctx) => {
-  ctx.sendChatAction('typing');
+bot.command('usage', (ctx) => {
+  const fs = require('fs');
+  const lines = [];
+
   try {
-    const result = await askClaude(
-      '請查看 /root/.claude/ 目錄下所有檔案，找出 Claude Code 使用量統計（current session 百分比、weekly 百分比、重置時間），並以純文字格式回報。若找不到用量檔案，請列出 /root/.claude/ 的檔案清單。',
-      async () => false
-    );
-    ctx.reply(result || '無用量資訊');
+    // 列出 .claude 目錄所有檔案（debug 用）
+    const claudeDir = '/root/.claude';
+    const files = fs.readdirSync(claudeDir);
+    lines.push(`📁 ${claudeDir}/`);
+    lines.push(files.join('\n'));
+    lines.push('');
+
+    // 嘗試讀取可能的用量檔案
+    const candidates = ['usage.json', 'stats.json', 'usage', 'session.json'];
+    for (const f of candidates) {
+      const p = `${claudeDir}/${f}`;
+      if (fs.existsSync(p)) {
+        lines.push(`📄 ${f}:`);
+        lines.push(fs.readFileSync(p, 'utf8').slice(0, 800));
+        lines.push('');
+      }
+    }
+
+    // 從 credentials 顯示訂閱資訊
+    const credPath = `${claudeDir}/.credentials.json`;
+    if (fs.existsSync(credPath)) {
+      const cred = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+      const oauth = cred.claudeAiOauth || cred;
+      if (oauth.subscriptionType) lines.push(`訂閱方案：${oauth.subscriptionType}`);
+      if (oauth.expiresAt) {
+        const exp = new Date(oauth.expiresAt);
+        lines.push(`Token 效期：${exp.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`);
+      }
+    }
   } catch (err) {
-    ctx.reply(`錯誤：${err.message}`);
+    lines.push(`錯誤：${err.message}`);
   }
+
+  ctx.reply(lines.join('\n') || '無用量資訊');
 });
 
 bot.command('model', async (ctx) => {
