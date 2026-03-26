@@ -138,10 +138,32 @@ bot.command('clear', (ctx) => {
 });
 
 bot.command('usage', async (ctx) => {
-  ctx.sendChatAction('typing');
   try {
-    const result = await runCLI('claude', ['usage']);
-    ctx.reply(result || '無用量資訊');
+    const fs = require('fs');
+    const lines = [];
+
+    // 讀取訂閱資訊
+    const credPath = '/root/.claude/.credentials.json';
+    if (fs.existsSync(credPath)) {
+      const cred = JSON.parse(fs.readFileSync(credPath, 'utf8'));
+      const oauth = cred.claudeAiOauth || cred;
+      if (oauth.subscriptionType) lines.push(`訂閱方案：${oauth.subscriptionType}`);
+      if (oauth.expiresAt) {
+        const exp = new Date(oauth.expiresAt);
+        lines.push(`Token 效期：${exp.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`);
+      }
+    }
+
+    // 讀取帳號資訊
+    const cfgPath = '/root/.claude.json';
+    if (fs.existsSync(cfgPath)) {
+      const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+      if (cfg.oauthAccount?.emailAddress) lines.push(`帳號：${cfg.oauthAccount.emailAddress}`);
+      if (cfg.oauthAccount?.displayName) lines.push(`名稱：${cfg.oauthAccount.displayName}`);
+    }
+
+    if (lines.length === 0) lines.push('無法讀取用量資訊，請至 https://claude.ai 查看');
+    ctx.reply(lines.join('\n'));
   } catch (err) {
     ctx.reply(`錯誤：${err.message}`);
   }
@@ -150,7 +172,6 @@ bot.command('usage', async (ctx) => {
 bot.command('model', async (ctx) => {
   ctx.sendChatAction('typing');
   try {
-    // claude --version 通常包含模型資訊；若無則詢問 Claude
     const ver = await runCLI('claude', ['--version']);
     ctx.reply(ver || '無法取得模型資訊');
   } catch (err) {
