@@ -136,64 +136,75 @@ bot.command('clear', (ctx) => {
   ctx.reply('對話記憶已清除。');
 });
 
-bot.command('usage', async (ctx) => {
-  ctx.sendChatAction('typing');
+bot.command('usage', (ctx) => {
   const fs = require('fs');
+  const path = require('path');
+  const lines = [];
 
   try {
-    // 讀取 access token
-    const cred = JSON.parse(fs.readFileSync('/root/.claude/.credentials.json', 'utf8'));
-    const oauth = cred.claudeAiOauth || cred;
-    const token = oauth.accessToken;
-    if (!token) return ctx.reply('錯誤：找不到 access token');
-
-    // 呼叫 Claude API 取得用量
-    const res = await fetch('https://api.claude.ai/api/usage_status', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-    });
-
-    if (!res.ok) {
-      // 回傳原始內容供 debug
-      const text = await res.text();
-      return ctx.reply(`API ${res.status}：${text.slice(0, 300)}`);
-    }
-
-    const data = await res.json();
-
-    // 格式化輸出
-    const lines = [];
-    if (data.model) lines.push(`模型：${data.model}`);
-
-    for (const [key, val] of Object.entries(data)) {
-      if (typeof val === 'object' && val !== null && 'percent' in val) {
-        const bar = renderBar(val.percent);
-        const reset = val.resetAt ? new Date(val.resetAt).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' }) : '';
-        lines.push(`${key.padEnd(8)} ${bar} ${val.percent}%${reset ? ` ⟳ ${reset}` : ''}`);
-      }
-    }
-
-    if (lines.length === 0) {
-      // 找不到預期欄位，回傳原始 JSON
-      lines.push(JSON.stringify(data, null, 2).slice(0, 800));
-    }
+    const claudeDir = '/root/.claude';
 
     // 訂閱資訊
-    if (oauth.subscriptionType) lines.push(`\n訂閱：${oauth.subscriptionType}`);
+    const cred = JSON.parse(fs.readFileSync(`${claudeDir}/.credentials.json`, 'utf8'));
+    const oauth = cred.claudeAiOauth || cred;
+    if (oauth.subscriptionType) lines.push(`訂閱：${oauth.subscriptionType}`);
+    if (oauth.expiresAt) {
+      const exp = new Date(oauth.expiresAt);
+      lines.push(`Token 效期：${exp.toLocaleString('zh-TW', { timeZone: 'Asia/Taipei' })}`);
+    }
 
-    ctx.reply(lines.join('\n'));
+    // 讀取 sessions 目錄
+    const sessionsDir = `${claudeDir}/sessions`;
+    if (!fs.existsSync(sessionsDir)) {
+      lines.push('\n(sessions 目錄不存在)');
+      return ctx.reply(lines.join('\n'));
+    }
+
+    const sessionFiles = fs.readdirSync(sessionsDir)
+      .filter(f => f.endsWith('.json'))
+      .map(f => ({
+        name: f,
+        mtime: fs.statSync(`${sessionsDir}/${f}`).mtimeMs,
+      }))
+      .sort((a, b) => b.mtime - a.mtime);
+
+    lines.push(`\nSessions：${sessionFiles.length} 個`);
+
+    // 統計最近 24 小時 & 7 天的 token 用量
+    const now = Date.now();
+    let tokens24h = 0, tokens7d = 0;
+
+    for (const sf of sessionFiles) {
+      if (now - sf.mtime > 7 * 24 * 60 * 60 * 1000) continue;
+      try {
+        const raw = fs.readFileSync(`${sessionsDir}/${sf.name}`, 'utf8');
+        const session = JSON.parse(raw);
+        const usage = session.usage || session.totalUsage || session.tokenUsage || {};
+        const total = (usage.input_tokens || 0) + (usage.output_tokens || 0)
+          + (usage.inputTokens || 0) + (usage.outputTokens || 0);
+        tokens7d += total;
+        if (now - sf.mtime <= 24 * 60 * 60 * 1000) tokens24h += total;
+      } catch { /* 忽略格式不符的檔案 */ }
+    }
+
+    if (tokens7d > 0) {
+      lines.push(`24h token 用量：${tokens24h.toLocaleString()}`);
+      lines.push(`7d  token 用量：${tokens7d.toLocaleString()}`);
+    } else if (sessionFiles.length > 0) {
+      // session 存在但無法解析用量，顯示最新一筆 raw 內容供 debug
+      const raw = fs.readFileSync(`${sessionsDir}/${sessionFiles[0].name}`, 'utf8');
+      lines.push('\n最新 session 結構：');
+      lines.push(raw.slice(0, 600));
+    } else {
+      lines.push('（無近期 session）');
+    }
+
   } catch (err) {
-    ctx.reply(`錯誤：${err.message}`);
+    lines.push(`錯誤：${err.message}`);
   }
-});
 
-function renderBar(percent) {
-  const total = 10;
-  const filled = Math.round((percent / 100) * total);
-  return '●'.repeat(filled) + '○'.repeat(total - filled);
-}
+  ctx.reply(lines.join('\n') || '無用量資訊');
+});
 
 bot.command('model', async (ctx) => {
   ctx.sendChatAction('typing');
