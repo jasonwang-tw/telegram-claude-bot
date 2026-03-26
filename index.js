@@ -1,5 +1,6 @@
 const { Telegraf } = require('telegraf');
 const { spawn } = require('child_process');
+const fs = require('fs');
 
 const bot = new Telegraf(process.env.TELEGRAM_BOT_TOKEN);
 
@@ -26,6 +27,61 @@ function runCLI(cmd, args = []) {
     });
   });
 }
+
+// ── Zeabur 憑證自動更新 ──────────────────────────────────
+let _lastCredHash = '';
+
+async function updateZeaburCredentials() {
+  const apiToken = process.env.ZEABUR_API_TOKEN;
+  const serviceID = process.env.ZEABUR_SERVICE_ID;
+  const envID     = process.env.ZEABUR_ENV_ID;
+  if (!apiToken || !serviceID || !envID) return;
+
+  try {
+    const raw  = fs.readFileSync('/root/.claude/.credentials.json', 'utf8');
+    const hash = raw.slice(-40); // 末尾 40 字元作為變更偵測
+    if (hash === _lastCredHash) return; // 沒有變更，不打 API
+
+    const encoded = Buffer.from(raw).toString('base64');
+
+    const res = await fetch('https://gateway.zeabur.com/graphql', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        query: `mutation ($serviceID: ObjectID!, $environmentID: ObjectID!, $key: String!, $value: String!) {
+          updateServiceVariable(serviceID: $serviceID, environmentID: $environmentID, key: $key, value: $value)
+        }`,
+        variables: { serviceID, environmentID: envID, key: 'CLAUDE_CREDENTIALS', value: encoded },
+      }),
+    });
+
+    const data = await res.json();
+    if (data.errors) {
+      console.error('Zeabur 更新失敗：', JSON.stringify(data.errors));
+    } else {
+      _lastCredHash = hash;
+      console.log('✅ CLAUDE_CREDENTIALS 已同步至 Zeabur');
+    }
+  } catch (err) {
+    console.error('Zeabur 更新錯誤：', err.message);
+  }
+}
+
+// 每 4 小時定期同步：若 token 剩不到 1 小時就先觸發 refresh
+setInterval(async () => {
+  try {
+    const cred = JSON.parse(fs.readFileSync('/root/.claude/.credentials.json', 'utf8'));
+    const expiresAt = cred.claudeAiOauth?.expiresAt || 0;
+    if (expiresAt - Date.now() < 60 * 60 * 1000) {
+      console.log('Token 即將過期，觸發 refresh...');
+      await runCLI('claude', ['--print', 'hi']); // 最小對話，觸發 OAuth refresh
+    }
+  } catch (e) { /* ignore */ }
+  await updateZeaburCredentials();
+}, 4 * 60 * 60 * 1000);
 
 function buildPrompt(history, newMessage) {
   if (history.length === 0) return newMessage;
@@ -254,6 +310,9 @@ bot.on('text', async (ctx) => {
 
     if (history.length > 20) history.splice(0, history.length - 20);
     conversations.set(userId, history);
+
+    // 對話後同步憑證（claude --print 可能已 refresh token）
+    updateZeaburCredentials().catch(() => {});
 
     ctx.reply(response, { parse_mode: 'Markdown' })
       .catch(() => ctx.reply(response));
