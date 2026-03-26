@@ -50,7 +50,7 @@ async function updateZeaburCredentials() {
       headers: { 'Authorization': `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         query: `query ($serviceID: ObjectID!, $environmentID: ObjectID!) {
-          serviceVariables(serviceID: $serviceID, environmentID: $environmentID) { key value }
+          service(_id: $serviceID) { variables(environmentID: $environmentID) { key value } }
         }`,
         variables: { serviceID, environmentID: envID },
       }),
@@ -63,7 +63,7 @@ async function updateZeaburCredentials() {
 
     // 合併：保留所有現有變數，只更新 CLAUDE_CREDENTIALS
     const existing = {};
-    for (const v of (queryData.data?.serviceVariables || [])) {
+    for (const v of (queryData.data?.service?.variables || [])) {
       existing[v.key] = v.value;
     }
     existing['CLAUDE_CREDENTIALS'] = encoded;
