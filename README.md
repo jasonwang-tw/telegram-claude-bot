@@ -2,7 +2,7 @@
 
 在 Zeabur 雲端部署 Claude Code Telegram Bot，使用 Claude.ai 訂閱 OAuth 驗證。
 
-**版本：1.3.1**
+**版本：1.3.2**
 
 ---
 
@@ -260,6 +260,12 @@ claude auth login
 ---
 
 ## Changelog
+
+## [1.3.2] - 2026-03-26
+### Added
+- 新增預設指令：`/help`、`/usage`、`/model`、`/status`、`/version`
+- 透過 `setMyCommands` 註冊指令選單，在 Telegram 輸入框旁顯示
+- `runCLI` 輔助函式：直接執行 CLI 指令（不經 Claude），供指令處理器使用
 
 ## [1.3.1] - 2026-03-26
 ### Fixed

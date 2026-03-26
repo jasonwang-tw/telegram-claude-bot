@@ -13,6 +13,20 @@ const ALLOWED_IDS = process.env.ALLOWED_USER_IDS
 // 所有需要授權的模式（y/n 類）
 const PERMISSION_PATTERN = /\(y\)es\s*\/\s*\(n\)o|\(y\/n\)|\[y\/n\]|\(yes\/no\)|press enter|continue\?|Allow\s+.+\?|Do you want to allow|bash command:|wants to (read|write|run|execute|edit)/i;
 
+// 直接執行 CLI 指令（不經 Claude），回傳 stdout
+function runCLI(cmd, args = []) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(cmd, args, { env: { ...process.env } });
+    let stdout = '', stderr = '';
+    child.stdout.on('data', (d) => { stdout += d.toString(); });
+    child.stderr.on('data', (d) => { stderr += d.toString(); });
+    child.on('close', (code) => {
+      if (code !== 0) reject(new Error(stderr.trim() || `exit code ${code}`));
+      else resolve(stdout.trim());
+    });
+  });
+}
+
 function buildPrompt(history, newMessage) {
   if (history.length === 0) return newMessage;
   const ctx = history.map(h => `${h.role}: ${h.content}`).join('\n');
@@ -85,11 +99,85 @@ bot.action(/^perm_(allow|deny)_(.+)$/, async (ctx) => {
   pending.resolve(allowed);
 });
 
-bot.start((ctx) => ctx.reply('你好！我是 Claude Bot。\n\n指令：\n/clear — 清除對話記憶'));
+// 註冊指令選單（顯示在 Telegram 輸入框旁）
+bot.telegram.setMyCommands([
+  { command: 'start',  description: '啟動 Bot' },
+  { command: 'help',   description: '顯示所有指令' },
+  { command: 'clear',  description: '清除對話記憶' },
+  { command: 'usage',  description: '查看 Claude 用量' },
+  { command: 'model',  description: '目前使用的模型' },
+  { command: 'status', description: 'Bot 狀態' },
+  { command: 'version',description: 'Claude CLI 版本' },
+]).catch(console.error);
+
+bot.start((ctx) => ctx.reply(
+  '你好！我是 Claude Bot。\n\n可用指令：\n' +
+  '/help — 顯示所有指令\n' +
+  '/clear — 清除對話記憶\n' +
+  '/usage — 查看 Claude 用量\n' +
+  '/model — 目前使用的模型\n' +
+  '/status — Bot 狀態\n' +
+  '/version — Claude CLI 版本'
+));
+
+bot.command('help', (ctx) => {
+  ctx.reply(
+    '可用指令：\n\n' +
+    '/clear — 清除對話記憶\n' +
+    '/usage — 查看 Claude token 用量\n' +
+    '/model — 目前使用的模型\n' +
+    '/status — Bot 運作狀態\n' +
+    '/version — Claude CLI 版本\n\n' +
+    '直接輸入文字即可與 Claude 對話。'
+  );
+});
 
 bot.command('clear', (ctx) => {
   conversations.delete(ctx.from.id);
   ctx.reply('對話記憶已清除。');
+});
+
+bot.command('usage', async (ctx) => {
+  ctx.sendChatAction('typing');
+  try {
+    const result = await runCLI('claude', ['usage']);
+    ctx.reply(result || '無用量資訊');
+  } catch (err) {
+    ctx.reply(`錯誤：${err.message}`);
+  }
+});
+
+bot.command('model', async (ctx) => {
+  ctx.sendChatAction('typing');
+  try {
+    // claude --version 通常包含模型資訊；若無則詢問 Claude
+    const ver = await runCLI('claude', ['--version']);
+    ctx.reply(ver || '無法取得模型資訊');
+  } catch (err) {
+    ctx.reply(`錯誤：${err.message}`);
+  }
+});
+
+bot.command('status', (ctx) => {
+  const uptime = process.uptime();
+  const h = Math.floor(uptime / 3600);
+  const m = Math.floor((uptime % 3600) / 60);
+  const s = Math.floor(uptime % 60);
+  ctx.reply(
+    `✅ Bot 正常運作中\n\n` +
+    `運行時間：${h}h ${m}m ${s}s\n` +
+    `對話中的用戶：${conversations.size}`
+  );
+});
+
+bot.command('version', async (ctx) => {
+  ctx.sendChatAction('typing');
+  try {
+    const result = await runCLI('claude', ['--version']);
+    ctx.reply(result || '無法取得版本');
+  } catch (err) {
+    ctx.reply(`錯誤：${err.message}`);
+  }
 });
 
 bot.on('text', async (ctx) => {
