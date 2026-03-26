@@ -26,4 +26,5 @@ CMD ["sh", "-c", "\
     if [ -n \"$LATEST\" ]; then cp \"$LATEST\" /root/.claude.json; \
     else echo '{\"hasCompletedOnboarding\":true}' > /root/.claude.json; fi; \
   fi && \
+  echo '{\"permissions\":{\"allow\":[\"Bash(*)\",\"Read(*)\",\"Write(*)\",\"Edit(*)\",\"MultiEdit(*)\",\"Glob(*)\",\"Grep(*)\",\"WebFetch(*)\",\"WebSearch(*)\",\"TodoWrite(*)\",\"TodoRead(*)\"]}}' > /root/.claude/settings.json && \
   node index.js"]
