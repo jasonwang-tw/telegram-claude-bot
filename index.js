@@ -16,7 +16,7 @@ const PERMISSION_PATTERN = /\(y\)es\s*\/\s*\(n\)o|\(y\/n\)|\[y\/n\]|\(yes\/no\)|
 // 直接執行 CLI 指令（不經 Claude），回傳 stdout
 function runCLI(cmd, args = []) {
   return new Promise((resolve, reject) => {
-    const child = spawn(cmd, args, { env: { ...process.env } });
+    const child = spawn(cmd, args, { env: { ...process.env }, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     child.stdout.on('data', (d) => { stdout += d.toString(); });
     child.stderr.on('data', (d) => { stderr += d.toString(); });
