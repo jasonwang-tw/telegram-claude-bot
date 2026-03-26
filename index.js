@@ -44,17 +44,17 @@ async function updateZeaburCredentials() {
 
     const encoded = Buffer.from(raw).toString('base64');
 
-    const res = await fetch('https://gateway.zeabur.com/graphql', {
+    const res = await fetch('https://api.zeabur.com/graphql', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        query: `mutation ($serviceID: ObjectID!, $environmentID: ObjectID!, $key: String!, $value: String!) {
-          updateServiceVariable(serviceID: $serviceID, environmentID: $environmentID, key: $key, value: $value)
+        query: `mutation ($serviceID: ObjectID!, $environmentID: ObjectID!, $data: Map!) {
+          updateEnvironmentVariable(serviceID: $serviceID, environmentID: $environmentID, data: $data)
         }`,
-        variables: { serviceID, environmentID: envID, key: 'CLAUDE_CREDENTIALS', value: encoded },
+        variables: { serviceID, environmentID: envID, data: { CLAUDE_CREDENTIALS: encoded } },
       }),
     });
 
