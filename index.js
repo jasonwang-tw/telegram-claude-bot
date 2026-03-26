@@ -44,23 +44,44 @@ async function updateZeaburCredentials() {
 
     const encoded = Buffer.from(raw).toString('base64');
 
-    const res = await fetch('https://api.zeabur.com/graphql', {
+    // 先讀取現有所有環境變數
+    const queryRes = await fetch('https://api.zeabur.com/graphql', {
       method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiToken}`,
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Authorization': `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: `query ($serviceID: ObjectID!, $environmentID: ObjectID!) {
+          serviceVariables(serviceID: $serviceID, environmentID: $environmentID) { key value }
+        }`,
+        variables: { serviceID, environmentID: envID },
+      }),
+    });
+    const queryData = await queryRes.json();
+    if (queryData.errors) {
+      console.error('Zeabur 讀取變數失敗：', JSON.stringify(queryData.errors));
+      return;
+    }
+
+    // 合併：保留所有現有變數，只更新 CLAUDE_CREDENTIALS
+    const existing = {};
+    for (const v of (queryData.data?.serviceVariables || [])) {
+      existing[v.key] = v.value;
+    }
+    existing['CLAUDE_CREDENTIALS'] = encoded;
+
+    const mutRes = await fetch('https://api.zeabur.com/graphql', {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiToken}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
         query: `mutation ($serviceID: ObjectID!, $environmentID: ObjectID!, $data: Map!) {
           updateEnvironmentVariable(serviceID: $serviceID, environmentID: $environmentID, data: $data)
         }`,
-        variables: { serviceID, environmentID: envID, data: { CLAUDE_CREDENTIALS: encoded } },
+        variables: { serviceID, environmentID: envID, data: existing },
       }),
     });
 
-    const data = await res.json();
-    if (data.errors) {
-      console.error('Zeabur 更新失敗：', JSON.stringify(data.errors));
+    const mutData = await mutRes.json();
+    if (mutData.errors) {
+      console.error('Zeabur 更新失敗：', JSON.stringify(mutData.errors));
     } else {
       _lastCredHash = hash;
       console.log('✅ CLAUDE_CREDENTIALS 已同步至 Zeabur');
